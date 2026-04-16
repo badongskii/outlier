@@ -43,19 +43,43 @@ def refresh_access_token() -> dict[str, Any]:
     return response.json()
 
 
+#Get latest activity date already stored in Supabase
+def get_latest_stored_date(supabase: Client) -> str | None:
+    response = (
+        supabase.table("activities")
+        .select("start_date")
+        .order("start_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if response.data:
+        return response.data[0]["start_date"]
+    return None
+
+
 #Pulling Strava Activities
-def get_all_activities(access_token: str) -> list[dict[str, Any]]:
+def get_all_activities(access_token: str, after_date: str | None = None) -> list[dict[str, Any]]:
     all_activities = []
     page = 1
     per_page = 50  # max allowed is 200, but 50 is safe
 
+    after_ts = None
+    if after_date:
+        dt = datetime.fromisoformat(after_date.replace("Z", "+00:00"))
+        after_ts = int(dt.timestamp())
+        print(f"Only fetching activities after: {after_date}")
+
     while True:
         print(f"Fetching page {page}...")
+
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if after_ts:
+            params["after"] = after_ts
 
         response = requests.get(
             "https://www.strava.com/api/v3/athlete/activities",
             headers={"Authorization": f"Bearer {access_token}"},
-            params={"page": page, "per_page": per_page},
+            params=params,
             timeout=30,
         )
 
@@ -239,17 +263,24 @@ def main() -> None:
         print(f"Expires at: {datetime.fromtimestamp(int(token_data['expires_at']))}")
         print("-" * 50)
 
-        print("Fetching recent activities from Strava...")
-        activities = get_all_activities(access_token)
+        print("Connecting to Supabase...")
+        supabase = get_supabase_client()
+
+        print("Checking for latest activity already in database...")
+        latest_date = get_latest_stored_date(supabase)
+        if latest_date:
+            print(f"Latest stored activity: {latest_date}")
+        else:
+            print("No activities in database yet — doing full sync.")
+
+        print("Fetching new activities from Strava...")
+        activities = get_all_activities(access_token, after_date=latest_date)
 
         if not activities:
-            print("No activities found.")
+            print("No new activities to sync. Already up to date.")
             return
 
         print_activity_summary(activities)
-
-        print("Connecting to Supabase...")
-        supabase = get_supabase_client()
 
         print("Upserting activities into database...")
         upsert_activities(supabase, activities)
