@@ -44,20 +44,36 @@ def refresh_access_token() -> dict[str, Any]:
 
 
 #Pulling Strava Activities
-def get_recent_activities(access_token: str, per_page: int = 10) -> list[dict[str, Any]]:
-    response = requests.get(
-        "https://www.strava.com/api/v3/athlete/activities",
-        headers={"Authorization": f"Bearer {access_token}"},
-        params={"page": 1, "per_page": per_page},
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
+def get_all_activities(access_token: str) -> list[dict[str, Any]]:
+    all_activities = []
+    page = 1
+    per_page = 50  # max allowed is 200, but 50 is safe
+
+    while True:
+        print(f"Fetching page {page}...")
+
+        response = requests.get(
+            "https://www.strava.com/api/v3/athlete/activities",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"page": page, "per_page": per_page},
+            timeout=30,
+        )
+
+        response.raise_for_status()
+        activities = response.json()
+
+        if not activities:
+            break  # no more data
+
+        all_activities.extend(activities)
+        page += 1
+
+    print(f"Fetched total activities: {len(all_activities)}")
+    return all_activities
 
 
-#Running pace formatting
 def format_pace(distance_m: float, moving_time_s: int) -> str:
-    if distance_m <= 0 or moving_time_s <= 0:
+    if not distance_m or not moving_time_s or distance_m <= 0 or moving_time_s <= 0:
         return "N/A"
 
     pace_seconds_per_km = moving_time_s / (distance_m / 1000)
@@ -224,7 +240,7 @@ def main() -> None:
         print("-" * 50)
 
         print("Fetching recent activities from Strava...")
-        activities = get_recent_activities(access_token, per_page=10)
+        activities = get_all_activities(access_token)
 
         if not activities:
             print("No activities found.")
