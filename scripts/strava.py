@@ -55,6 +55,7 @@ def get_recent_activities(access_token: str, per_page: int = 10) -> list[dict[st
     return response.json()
 
 
+#Running pace formatting
 def format_pace(distance_m: float, moving_time_s: int) -> str:
     if distance_m <= 0 or moving_time_s <= 0:
         return "N/A"
@@ -65,6 +66,7 @@ def format_pace(distance_m: float, moving_time_s: int) -> str:
     return f"{minutes}:{seconds:02d}/km"
 
 
+#Run location start
 def parse_start_coords(activity: dict[str, Any]) -> tuple[float | None, float | None]:
     coords = activity.get("start_latlng")
     if isinstance(coords, list) and len(coords) == 2:
@@ -79,7 +81,7 @@ def activity_to_row(activity: dict[str, Any]) -> dict[str, Any]:
         "strava_activity_id": activity.get("id"),
         "name": activity.get("name"),
         "sport_type": activity.get("sport_type"),
-        "start_date": activity.get("start_date_local"),
+        "start_date": activity.get("start_date"),
         "distance_m": activity.get("distance"),
         "moving_time_s": activity.get("moving_time"),
         "elapsed_time_s": activity.get("elapsed_time"),
@@ -93,8 +95,87 @@ def activity_to_row(activity: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#Open weather data extraction
+def get_openweather_api_key() -> str:
+    return require_env("OPENWEATHER_API_KEY")
+
+
+def get_historical_weather(lat: float, lon: float, run_timestamp: int) -> dict[str, Any]:
+    """
+    Fetch historical weather for the run start time using OpenWeather One Call 3.0.
+    """
+    api_key = get_openweather_api_key()
+
+    url = "https://api.openweathermap.org/data/3.0/onecall/timemachine"
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "dt": run_timestamp,
+        "appid": api_key,
+        "units": "metric",
+    }
+
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_run_timestamp(activity: dict[str, Any]) -> int | None:
+    start_date = activity.get("start_date")
+    if not start_date:
+        return None
+
+    dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+    return int(dt.timestamp())
+
+
+def extract_weather_fields(weather_data: dict[str, Any]) -> dict[str, Any]:
+    data_points = weather_data.get("data", [])
+    if not data_points:
+        return {}
+
+    point = data_points[0]
+    weather_list = point.get("weather", [])
+    weather_main = weather_list[0].get("main") if weather_list else None
+    weather_description = weather_list[0].get("description") if weather_list else None
+
+    return {
+        "temperature": point.get("temp"),
+        "humidity": point.get("humidity"),
+        "wind_speed": point.get("wind_speed"),
+        "weather_main": weather_main,
+        "weather_description": weather_description,
+    }
+
+
+def enrich_activities_with_weather(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched = []
+
+    for activity in activities:
+        row = activity_to_row(activity)
+
+        lat = row.get("start_lat")
+        lng = row.get("start_lng")
+        timestamp = parse_run_timestamp(activity)
+
+        if lat is not None and lng is not None and timestamp is not None:
+            try:
+                weather_data = get_historical_weather(lat, lng, timestamp)
+                weather_fields = extract_weather_fields(weather_data)
+                row.update(weather_fields)
+                print(f"Added weather for activity {row.get('strava_activity_id')}")
+            except requests.HTTPError as e:
+                print(f"Weather lookup failed for activity {row.get('strava_activity_id')}: {e}")
+        else:
+            print(f"Skipping weather for activity {row.get('strava_activity_id')} due to missing coords/time")
+
+        enriched.append(row)
+
+    return enriched
+
+
 def upsert_activities(supabase: Client, activities: list[dict[str, Any]]) -> None:
-    rows = [activity_to_row(activity) for activity in activities]
+    rows = enrich_activities_with_weather(activities)
 
     if not rows:
         print("No rows to insert.")
@@ -139,7 +220,7 @@ def main() -> None:
         access_token = token_data["access_token"]
 
         print("Successfully refreshed access token.")
-        print(f"Expires at: {datetime.fromtimestamp(token_data['expires_at'])}")
+        print(f"Expires at: {datetime.fromtimestamp(int(token_data['expires_at']))}")
         print("-" * 50)
 
         print("Fetching recent activities from Strava...")
