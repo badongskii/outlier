@@ -32,9 +32,7 @@ def require_env(name: str) -> str:
     return value
 
 
-# -----------------------------------------------------------------------
 # Supabase helpers
-# -----------------------------------------------------------------------
 
 def get_recent_runs(limit: int = 10) -> list[dict[str, Any]]:
     """Fetch the most recent runs from Supabase."""
@@ -76,10 +74,7 @@ def format_runs_for_prompt(runs: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-# -----------------------------------------------------------------------
 # Claude
-# -----------------------------------------------------------------------
-
 def ask_claude(user_message: str, runs_context: str) -> str:
     """Send a message to Claude with running context and return the reply."""
     api_key = require_env("ANTHROPIC_API_KEY")
@@ -109,7 +104,7 @@ My message: {user_message}"""
             "content-type": "application/json",
         },
         json={
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 1024,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_content}],
@@ -147,9 +142,7 @@ def generate_run_summary(run: dict[str, Any]) -> str:
     )
 
 
-# -----------------------------------------------------------------------
 # Telegram bot
-# -----------------------------------------------------------------------
 
 telegram_app: Application | None = None
 
@@ -203,10 +196,7 @@ async def shutdown():
         await telegram_app.stop()
 
 
-# -----------------------------------------------------------------------
 # Telegram webhook endpoint
-# -----------------------------------------------------------------------
-
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     """Receive updates from Telegram."""
@@ -216,10 +206,7 @@ async def telegram_webhook(request: Request):
     return JSONResponse({"status": "ok"})
 
 
-# -----------------------------------------------------------------------
 # Strava webhook endpoints
-# -----------------------------------------------------------------------
-
 def fetch_single_activity(access_token: str, activity_id: int) -> dict[str, Any]:
     response = requests.get(
         f"https://www.strava.com/api/v3/activities/{activity_id}",
