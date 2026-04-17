@@ -121,7 +121,7 @@ def activity_to_row(activity: dict[str, Any]) -> dict[str, Any]:
         "strava_activity_id": activity.get("id"),
         "name": activity.get("name"),
         "sport_type": activity.get("sport_type"),
-        "start_date": activity.get("start_date"),
+        "start_date": activity.get("start_date_local"),
         "distance_m": activity.get("distance"),
         "moving_time_s": activity.get("moving_time"),
         "elapsed_time_s": activity.get("elapsed_time"),
