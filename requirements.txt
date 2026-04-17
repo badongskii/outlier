@@ -3,3 +3,4 @@ python-dotenv
 supabase
 fastapi
 uvicorn
+python-telegram-bot
