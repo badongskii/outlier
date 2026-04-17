@@ -43,31 +43,44 @@ def refresh_access_token() -> dict[str, Any]:
     return response.json()
 
 
-#Get latest activity date already stored in Supabase
-def get_latest_stored_date(supabase: Client) -> str | None:
+#Get latest activity already stored in Supabase
+#Uses strava_activity_id (which is a Unix timestamp-based ID) for reliable ordering
+def get_latest_stored_id(supabase: Client) -> int | None:
     response = (
         supabase.table("activities")
-        .select("start_date")
-        .order("start_date", desc=True)
+        .select("strava_activity_id")
+        .order("strava_activity_id", desc=True)
         .limit(1)
         .execute()
     )
     if response.data:
-        return response.data[0]["start_date"]
+        return response.data[0]["strava_activity_id"]
     return None
 
 
 #Pulling Strava Activities
-def get_all_activities(access_token: str, after_date: str | None = None) -> list[dict[str, Any]]:
+def get_all_activities(access_token: str, after_id: int | None = None) -> list[dict[str, Any]]:
     all_activities = []
     page = 1
-    per_page = 50  # max allowed is 200, but 50 is safe
+    per_page = 50
 
-    after_ts = None
-    if after_date:
-        dt = datetime.fromisoformat(after_date.replace("Z", "+00:00"))
-        after_ts = int(dt.timestamp())
-        print(f"Only fetching activities after: {after_date}")
+    # Strava's "after" param is a Unix timestamp — use the activity ID as a proxy
+    # since Strava activity IDs are time-ordered
+    if after_id:
+        # Fetch the latest activity from Strava to get its timestamp
+        response = requests.get(
+            f"https://www.strava.com/api/v3/activities/{after_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        latest = response.json()
+        after_ts = int(datetime.fromisoformat(
+            latest["start_date"].replace("Z", "+00:00")
+        ).timestamp())
+        print(f"Only fetching activities after ID {after_id} (timestamp {after_ts})")
+    else:
+        after_ts = None
 
     while True:
         print(f"Fetching page {page}...")
@@ -87,7 +100,7 @@ def get_all_activities(access_token: str, after_date: str | None = None) -> list
         activities = response.json()
 
         if not activities:
-            break  # no more data
+            break
 
         all_activities.extend(activities)
         page += 1
@@ -121,7 +134,7 @@ def activity_to_row(activity: dict[str, Any]) -> dict[str, Any]:
         "strava_activity_id": activity.get("id"),
         "name": activity.get("name"),
         "sport_type": activity.get("sport_type"),
-        "start_date": activity.get("start_date_local"),
+        "start_date": activity.get("start_date_local"),  # local time for correct date display
         "distance_m": activity.get("distance"),
         "moving_time_s": activity.get("moving_time"),
         "elapsed_time_s": activity.get("elapsed_time"),
@@ -141,9 +154,6 @@ def get_openweather_api_key() -> str:
 
 
 def get_historical_weather(lat: float, lon: float, run_timestamp: int) -> dict[str, Any]:
-    """
-    Fetch historical weather for the run start time using OpenWeather One Call 3.0.
-    """
     api_key = get_openweather_api_key()
 
     url = "https://api.openweathermap.org/data/3.0/onecall/timemachine"
@@ -161,6 +171,7 @@ def get_historical_weather(lat: float, lon: float, run_timestamp: int) -> dict[s
 
 
 def parse_run_timestamp(activity: dict[str, Any]) -> int | None:
+    # Always use UTC start_date for weather API calls
     start_date = activity.get("start_date")
     if not start_date:
         return None
@@ -267,14 +278,14 @@ def main() -> None:
         supabase = get_supabase_client()
 
         print("Checking for latest activity already in database...")
-        latest_date = get_latest_stored_date(supabase)
-        if latest_date:
-            print(f"Latest stored activity: {latest_date}")
+        latest_id = get_latest_stored_id(supabase)
+        if latest_id:
+            print(f"Latest stored activity ID: {latest_id}")
         else:
             print("No activities in database yet — doing full sync.")
 
         print("Fetching new activities from Strava...")
-        activities = get_all_activities(access_token, after_date=latest_date)
+        activities = get_all_activities(access_token, after_id=latest_id)
 
         if not activities:
             print("No new activities to sync. Already up to date.")
